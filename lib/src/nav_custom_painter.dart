@@ -5,9 +5,10 @@ class NavCustomPainter extends CustomPainter {
   late double s;
   Color color;
   TextDirection textDirection;
+  double flatten; // New variable: 0.0 = Curved, 1.0 = Flat
 
   NavCustomPainter(
-      double startingLoc, int itemsLength, this.color, this.textDirection) {
+      double startingLoc, int itemsLength, this.color, this.textDirection, this.flatten) {
     final span = 1.0 / itemsLength;
     s = 0.2;
     double l = startingLoc + (span - s) / 2;
@@ -20,22 +21,27 @@ class NavCustomPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
+    // We scale the "depth" of the curve by (1 - flatten)
+    // If flatten is 1.0, these become 0.0, creating a straight line.
+    double curveHeight = size.height * 0.60 * (1 - flatten);
+    double topHeight = size.height * 0.05 * (1 - flatten);
+
     final path = Path()
       ..moveTo(0, 0)
       ..lineTo((loc - 0.1) * size.width, 0)
       ..cubicTo(
         (loc + s * 0.20) * size.width,
-        size.height * 0.05,
+        topHeight,
         loc * size.width,
-        size.height * 0.60,
+        curveHeight,
         (loc + s * 0.50) * size.width,
-        size.height * 0.60,
+        curveHeight,
       )
       ..cubicTo(
         (loc + s) * size.width,
-        size.height * 0.60,
+        curveHeight,
         (loc + s - s * 0.20) * size.width,
-        size.height * 0.05,
+        topHeight,
         (loc + s + 0.1) * size.width,
         0,
       )
@@ -48,6 +54,6 @@ class NavCustomPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) {
-    return this != oldDelegate;
+    return true;
   }
 }
