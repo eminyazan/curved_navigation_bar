@@ -8,7 +8,7 @@ typedef _LetIndexPage = bool Function(int value);
 
 class CurvedNavigationBar extends StatefulWidget {
   final List<Widget> items;
-  final int index;
+  final int index, mainIndex; // Added mainIndex support
   final Color color;
   final Color? buttonBackgroundColor;
   final Color backgroundColor;
@@ -23,6 +23,7 @@ class CurvedNavigationBar extends StatefulWidget {
     Key? key,
     required this.items,
     this.index = 0,
+    this.mainIndex = 1, // Default main action button is index 1
     this.color = Colors.white,
     this.buttonBackgroundColor,
     this.backgroundColor = Colors.blueAccent,
@@ -54,11 +55,14 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   late int _length;
 
   // -- ANIMATION CONTROLLERS --
-  late AnimationController _flattenController; // 1. Pop Up
-  late AnimationController _widthController; // 2. Stretch
-  late AnimationController _iconsController; // 3. Icons Reveal
+  late AnimationController _flattenController;
+  late AnimationController _widthController;
+  late AnimationController _iconsController;
 
   bool _isExpanded = false;
+
+  // NEW: Stores the index we want to go to after closing the animation
+  int? _pendingIndex;
 
   @override
   void initState() {
@@ -91,10 +95,19 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
     _flattenController.addListener(() => setState(() {}));
 
-    // OPEN: When Up finishes -> Start Stretching
     _flattenController.addStatusListener((status) {
+      // OPEN: When Up finishes -> Start Stretching
       if (status == AnimationStatus.completed) {
         _widthController.forward();
+      }
+
+      // CLOSE: When Drop Down finishes -> Check if we need to move to a new tab
+      if (status == AnimationStatus.dismissed) {
+        if (_pendingIndex != null) {
+          // The menu is fully closed, NOW we move to the other tab
+          _handleMove(_pendingIndex!);
+          _pendingIndex = null; // Reset pending state
+        }
       }
     });
 
@@ -105,8 +118,8 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
     _widthController.addListener(() => setState(() {}));
 
-    // OPEN: When Stretch finishes -> Start Icons
     _widthController.addStatusListener((status) {
+      // OPEN: When Stretch finishes -> Start Icons
       if (status == AnimationStatus.completed) {
         _iconsController.forward();
       }
@@ -119,7 +132,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     // 3. Icons Reveal
     _iconsController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 200), // Fast reveal
+      duration: const Duration(milliseconds: 200),
     );
     _iconsController.addListener(() => setState(() {}));
 
@@ -169,28 +182,20 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
           final maxWidth = min(constraints.maxWidth, widget.maxWidth ?? constraints.maxWidth);
 
           // -- DIMENSIONS --
-          // -- DIMENSIONS --
           final double startWidth = 60.0;
           final double targetWidth = maxWidth * 0.8;
-
-          // CHANGE: Increased target radius from 10.0 to 30.0
-          // 30.0 = Half of startWidth (60.0), which creates a perfect "Pill" shape.
           final double targetRadius = 30.0;
 
           final double currentWidth = startWidth + (widthProgress * (targetWidth - startWidth));
-
-          // logic: Start(30) -> Target(30) = No change in radius (remains fully rounded)
           final double currentRadius = (startWidth / 2) - (widthProgress * ((startWidth / 2) - targetRadius));
 
           // -- CIRCLE SPAWNING MATH --
           final double availableSpace = targetWidth - 20;
           final double delta = availableSpace / 5;
 
-          // Phases for movement
           double p1 = (widthProgress / 0.5).clamp(0.0, 1.0);
           double p2 = ((widthProgress - 0.5) / 0.5).clamp(0.0, 1.0);
 
-          // X Positions relative to center
           double innerPos = p1 * delta;
           double outerPos = innerPos + (p2 * delta);
 
@@ -249,7 +254,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                         offset: Offset(finalXOffset, -(1 - _buttonHide) * 80 - (verticalProgress * 60)),
                         child: GestureDetector(
                           onTap: () {
-                            // If user taps the container itself (empty space), treat it as a close
                             _buttonTap(_endingIndex);
                           },
                           child: Container(
@@ -268,23 +272,14 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                                 // -- LEFT OUTER (Megaphone) --
                                 Transform.translate(
                                   offset: Offset(-outerPos, 0),
-                                  child: _buildAnimatedItem(
-                                    spawnOpacity: p2,
-                                    revealProgress: iconsProgress,
-                                    icon: Icons.campaign,
-                                  ),
+                                  child: _buildAnimatedItem(spawnOpacity: p2, revealProgress: iconsProgress, icon: Icons.campaign),
                                 ),
                                 // -- LEFT INNER (Chat) --
                                 Transform.translate(
                                   offset: Offset(-innerPos, 0),
-                                  child: _buildAnimatedItem(
-                                    spawnOpacity: p1,
-                                    revealProgress: iconsProgress,
-                                    icon: Icons.chat_bubble_outline,
-                                  ),
+                                  child: _buildAnimatedItem(spawnOpacity: p1, revealProgress: iconsProgress, icon: Icons.chat_bubble_outline),
                                 ),
                                 // -- CENTER (QR / Original) --
-
                                 AnimatedSwitcher(
                                   duration: widget.flatDuration,
                                   transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
@@ -293,7 +288,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                                           spawnOpacity: 1.0,
                                           revealProgress: iconsProgress,
                                           icon: Icons.qr_code_scanner,
-                                          // Pass the original icon if not fully expanded yet
                                           fallbackIcon: _icon,
                                         )
                                       : SizedBox(
@@ -301,25 +295,15 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                                           child: _icon,
                                         ),
                                 ),
-
                                 // -- RIGHT INNER (Food) --
                                 Transform.translate(
                                   offset: Offset(innerPos, 0),
-                                  child: _buildAnimatedItem(
-                                    spawnOpacity: p1,
-                                    revealProgress: iconsProgress,
-                                    icon: Icons.restaurant,
-                                  ),
+                                  child: _buildAnimatedItem(spawnOpacity: p1, revealProgress: iconsProgress, icon: Icons.restaurant),
                                 ),
                                 // -- RIGHT OUTER (Close X) --
                                 Transform.translate(
                                   offset: Offset(outerPos, 0),
-                                  child: _buildAnimatedItem(
-                                    spawnOpacity: p2,
-                                    revealProgress: iconsProgress,
-                                    icon: Icons.close,
-                                    isCloseButton: true,
-                                  ),
+                                  child: _buildAnimatedItem(spawnOpacity: p2, revealProgress: iconsProgress, icon: Icons.close, isCloseButton: true),
                                 ),
                               ],
                             ),
@@ -337,20 +321,14 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
   }
 
-  // UPDATED: Handles the transition from White Circle -> Icon
   Widget _buildAnimatedItem({
     required double spawnOpacity,
     required double revealProgress,
     required IconData icon,
-    Widget? fallbackIcon, // Used for the center icon (initial state)
+    Widget? fallbackIcon,
     bool isCloseButton = false,
   }) {
-    // 1. White Circle Opacity:
-    // It exists based on spawnOpacity, but FADES OUT as revealProgress goes 0 -> 1
     final double circleOpacity = (spawnOpacity * (1 - revealProgress)).clamp(0.0, 1.0);
-
-    // 3. Slide Up Animation
-    // The final icons slide up from 20px down.
     final double yOffset = 20 * (1 - revealProgress);
 
     return Stack(
@@ -366,32 +344,25 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
               color: Colors.white,
               shape: BoxShape.circle,
             ),
-            child: fallbackIcon != null && revealProgress < 0.5
-                ? Center(child: fallbackIcon) // Show original icon inside white circle initially
-                : null,
+            child: fallbackIcon != null && revealProgress < 0.5 ? Center(child: fallbackIcon) : null,
           ),
         ),
 
         // Layer B: The Final Action Icon (Slides Up & Fades In)
-        if (revealProgress > 0.01) // Optimization: Only render if needed
+        if (revealProgress > 0.01)
           Transform.translate(
             offset: Offset(0, yOffset),
             child: Opacity(
               opacity: revealProgress,
               child: GestureDetector(
                 onTap: () {
-                  // Add specific logic for each button here
                   if (isCloseButton) {
-                    _buttonTap(_endingIndex); // Trigger close
+                    _buttonTap(_endingIndex);
                   } else {
                     print("Clicked $icon");
                   }
                 },
-                child: Icon(
-                  icon,
-                  color: Colors.white,
-                  size: 28,
-                ),
+                child: Icon(icon, color: Colors.white, size: 28),
               ),
             ),
           ),
@@ -399,34 +370,46 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
   }
 
+  // Replace your existing _buttonTap method with this one:
   void _buttonTap(int index) {
     if (!widget.letIndexChange(index) || _animationController.isAnimating) return;
 
-    if (widget.index == index) {
+    // 1. LOGIC FOR MAIN ACTION BUTTON (e.g., Index 1)
+    if (widget.mainIndex == index) {
+      // CASE A: We are coming from a different tab (Navigating TO the main button)
+      if (widget.index != index) {
+        // Just move the bubble. Do NOT open the animation yet.
+        _handleMove(index);
+        return;
+      }
+
+      // CASE B: We are ALREADY at the main button (Toggling the menu)
       if (_isExpanded) {
-        // CLOSE SEQUENCE:
-        // 1. Hide Icons first
-        _iconsController.reverse();
-        // 2. Listener triggers Width Reverse
-        // 3. Listener triggers Flatten Reverse
+        _iconsController.reverse(); // Close
         _isExpanded = false;
       } else {
-        // OPEN SEQUENCE:
-        // 1. Pop Up first
-        _flattenController.forward();
-        // 2. Listener triggers Width Forward
-        // 3. Listener triggers Icons Forward
+        _flattenController.forward(); // Open
         _isExpanded = true;
       }
-    } else {
-      if (_isExpanded) {
-        _iconsController.reverse();
-        _isExpanded = false;
-      }
+      return;
     }
 
-    if (widget.onTap != null) widget.onTap!(index);
+    // 2. LOGIC FOR OTHER BUTTONS
+    if (_isExpanded) {
+      // If expanded, close first, then move (Close First Logic)
+      _pendingIndex = index;
+      _iconsController.reverse();
+      _isExpanded = false;
+      return;
+    }
 
+    // 3. NORMAL NAVIGATION
+    _handleMove(index);
+  }
+
+  // NEW: Centralized helper to actually perform the nav bar slide
+  void _handleMove(int index) {
+    if (widget.onTap != null) widget.onTap!(index);
     final newPosition = index / _length;
     setState(() {
       _startingPos = _pos;
