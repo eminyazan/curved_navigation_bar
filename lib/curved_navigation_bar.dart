@@ -15,7 +15,7 @@ class CurvedNavigationBar extends StatefulWidget {
   final ValueChanged<int>? onTap;
   final _LetIndexPage letIndexChange;
   final Curve animationCurve;
-  final Duration animationDuration;
+  final Duration animationDuration, flatDuration;
   final double height;
   final double? maxWidth;
 
@@ -29,7 +29,8 @@ class CurvedNavigationBar extends StatefulWidget {
     this.onTap,
     _LetIndexPage? letIndexChange,
     this.animationCurve = Curves.easeOut,
-    this.animationDuration = const Duration(milliseconds: 600),
+    this.animationDuration = const Duration(milliseconds: 500),
+    this.flatDuration = const Duration(milliseconds: 250),
     this.height = 75.0,
     this.maxWidth,
   })  : letIndexChange = letIndexChange ?? ((_) => true),
@@ -44,7 +45,6 @@ class CurvedNavigationBar extends StatefulWidget {
 }
 
 class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerProviderStateMixin {
-  // Changed to Mixin to support multiple controllers
   late double _startingPos;
   late int _endingIndex;
   late double _pos;
@@ -53,8 +53,11 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   late AnimationController _animationController;
   late int _length;
 
-  // NEW: Controller for the Flatten/Pop-up animation
+  // 1. Vertical Controller (Pop Up)
   late AnimationController _flattenController;
+  // 2. Horizontal Controller (Stretch to 80%)
+  late AnimationController _widthController;
+
   bool _isExpanded = false;
 
   @override
@@ -80,13 +83,34 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
       });
     });
 
-    // Flatten animation (Up <-> Down)
+    // --- SEQUENTIAL ANIMATION SETUP ---
+
+    // 1. Vertical Up/Down
     _flattenController = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 400), // Speed of the pop-up
+      duration: widget.flatDuration,
     );
-    _flattenController.addListener(() {
-      setState(() {});
+    _flattenController.addListener(() => setState(() {}));
+
+    // When Up finishes -> Start Stretching
+    _flattenController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _widthController.forward();
+      }
+    });
+
+    // 2. Width Stretch
+    _widthController = AnimationController(
+      vsync: this,
+      duration: widget.flatDuration,
+    );
+    _widthController.addListener(() => setState(() {}));
+
+    // When Shrink finishes -> Start Going Down
+    _widthController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) {
+        _flattenController.reverse();
+      }
     });
   }
 
@@ -108,6 +132,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   void dispose() {
     _animationController.dispose();
     _flattenController.dispose();
+    _widthController.dispose();
     super.dispose();
   }
 
@@ -115,81 +140,123 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   Widget build(BuildContext context) {
     final textDirection = Directionality.of(context);
 
-    // 1. The Container determines the total "Hit Test" area.
-    // We keep the extra height (70.0) so the top part captures clicks.
+    // Animation Values
+    final double verticalProgress = _flattenController.value;
+    final double widthProgress = _widthController.value;
+
     return Container(
       height: widget.height,
       alignment: Alignment.bottomCenter,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final maxWidth = min(constraints.maxWidth, widget.maxWidth ?? constraints.maxWidth);
+
+          // -- WIDTH CALCULATIONS --
+          final double startWidth = 60.0;
+          // Target width is 80% of the Page Width
+          final double targetWidth = maxWidth * 0.8;
+
+          final double currentWidth = startWidth + (widthProgress * (targetWidth - startWidth));
+          final double currentRadius = (startWidth / 2) - (widthProgress * ((startWidth / 2) - 10.0));
+
           return Align(
             alignment: textDirection == TextDirection.ltr ? Alignment.bottomLeft : Alignment.bottomRight,
             child: SizedBox(
-              // Use SizedBox to constrain width, but let height fill parent
               width: maxWidth,
               child: Stack(
-                // 2. IMPORTANT: The Stack now fills the entire height (145px)
-                // This means clicks anywhere in this area are checked against the children.
                 clipBehavior: Clip.none,
                 alignment: Alignment.bottomCenter,
                 children: <Widget>[
-                  // 3. Background Painter (Pinned to the bottom 75px)
-                  // We treat this layer specifically as the "Bar"
+                  // 1. Background Painter
                   Positioned(
                     bottom: 0 - (75.0 - widget.height),
                     left: 0,
                     right: 0,
-                    height: 75.0, // Force the painter to stay in the original 75px box
+                    height: 75.0,
                     child: CustomPaint(
-                      painter: NavCustomPainter(_pos, _length, widget.color, textDirection, _flattenController.value),
+                      painter: NavCustomPainter(_pos, _length, widget.color, textDirection, verticalProgress),
                     ),
                   ),
 
-                  // 4. Icons Row (Pinned to the bottom)
+                  // 2. Icons Row
                   Positioned(
                     bottom: 0 - (75.0 - widget.height),
                     left: 0,
                     right: 0,
-                    height: 100.0, // Keep your original height for buttons
+                    height: 100.0,
                     child: Row(
-                        children: widget.items.map((item) => NavButton(
-                        onTap: _buttonTap,
-                        position: _pos,
-                        length: _length,
-                        index: widget.items.indexOf(item),
-                        child: Center(child: item),
-                      )).toList()),
+                        children: widget.items
+                            .map((item) => NavButton(
+                                  onTap: _buttonTap,
+                                  position: _pos,
+                                  length: _length,
+                                  index: widget.items.indexOf(item),
+                                  child: Center(child: item),
+                                ))
+                            .toList()),
                   ),
 
-                  // 5. Floating Button (Top Layer)
-                  // It is now a child of the tall Stack, so it can be clicked anywhere!
+                  // 3. Floating Button (Top Layer)
+                  // FIX: Set left/right to 0 so the constraints allow the button to grow to full screen width.
                   Positioned(
                     bottom: -40 - (75.0 - widget.height),
-                    left: textDirection == TextDirection.rtl ? null : _pos * maxWidth,
-                    right: textDirection == TextDirection.rtl ? _pos * maxWidth : null,
-                    width: maxWidth / _length,
+                    left: 0,
+                    right: 0,
+                    // Remove 'width: maxWidth / _length' constraint!
                     child: Center(
-                      child: Transform.translate(
-                        offset: Offset(
-                          0,
-                          -(1 - _buttonHide) * 80 - (_flattenController.value * 60),
-                        ),
-                        child: GestureDetector(
-                          onTap: () {
-                            print('Floating button tapped!'); // This will work now
-                            _buttonTap(_endingIndex);
-                          },
-                          child: Material(
-                            color: widget.buttonBackgroundColor ?? widget.color,
-                            type: MaterialType.circle,
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: _icon,
+                      child: Builder(builder: (context) {
+                        // -- 1. Calculate Distances --
+                        final double slotWidth = maxWidth / _length;
+                        // The center X coordinate of the currently selected tab
+                        final double activeTabCenter = (_pos * maxWidth) + (slotWidth / 2);
+                        // The absolute center of the screen
+                        final double screenCenter = maxWidth / 2;
+
+                        // Distance from the screen center to the tab center
+                        // (This is how far we need to push the button when it's closed)
+                        final double distFromCenter = activeTabCenter - screenCenter;
+
+                        // -- 2. Animate Translation --
+                        // When widthProgress is 0 (Closed): Offset = distFromCenter (Button is on the tab)
+                        // When widthProgress is 1 (Open): Offset = 0 (Button is in the center of screen)
+                        final double currentXOffset = distFromCenter * (1 - widthProgress);
+
+                        // Handle RTL
+                        final double finalXOffset = textDirection == TextDirection.rtl ? -currentXOffset : currentXOffset;
+
+                        return Transform.translate(
+                          offset: Offset(
+                            finalXOffset,
+                            -(1 - _buttonHide) * 80 - (verticalProgress * 60),
+                          ),
+                          child: GestureDetector(
+                            onTap: () {
+                              _buttonTap(_endingIndex);
+                            },
+                            child: Container(
+                              height: startWidth,
+                              width: currentWidth, // Now this 440.0 width can actually render!
+                              decoration: BoxDecoration(
+                                color: widget.buttonBackgroundColor ?? widget.color,
+                                borderRadius: BorderRadius.circular(currentRadius),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black26,
+                                    blurRadius: 2,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: _icon,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
+                        );
+                      }),
                     ),
                   ),
                 ],
@@ -202,34 +269,26 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   }
 
   void _buttonTap(int index) {
-    print('Button tapped: $index');
     if (!widget.letIndexChange(index) || _animationController.isAnimating) {
       return;
     }
 
-    // --- TOGGLE LOGIC START ---
-    // Assuming your "Main" button is at index 1. Change '1' if it's different.
-    if (index == 1) {
+    if (widget.index == index) {
       if (_isExpanded) {
-        print('Collapsing the button');
-        // If already expanded/flat, reverse it (go back to curve)
-        _flattenController.reverse();
+        // Close: Shrink Width -> Then Drop Down
+        _widthController.reverse();
         _isExpanded = false;
       } else {
-        print('Expanding the button');
-        // If curved, go forward (flatten and pop up)
+        // Open: Pop Up -> Then Stretch Width
         _flattenController.forward();
         _isExpanded = true;
       }
     } else {
-      // If user clicks a different button (0 or 2), we should reset the curve
       if (_isExpanded) {
-        print('Collapsing the button due to different index tap');
-        _flattenController.reverse();
+        _widthController.reverse();
         _isExpanded = false;
       }
     }
-    // --- TOGGLE LOGIC END ---
 
     if (widget.onTap != null) {
       widget.onTap!(index);
