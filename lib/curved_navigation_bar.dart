@@ -15,7 +15,7 @@ class CurvedNavigationBar extends StatefulWidget {
   final ValueChanged<int>? onTap;
   final _LetIndexPage letIndexChange;
   final Curve animationCurve;
-  final Duration animationDuration, flatDuration;
+  final Duration animationDuration, flatDuration, iconRevealDuration;
   final double height;
   final double? maxWidth;
 
@@ -31,7 +31,8 @@ class CurvedNavigationBar extends StatefulWidget {
     _LetIndexPage? letIndexChange,
     this.animationCurve = Curves.easeOut,
     this.animationDuration = const Duration(milliseconds: 500),
-    this.flatDuration = const Duration(milliseconds: 250),
+    this.iconRevealDuration = const Duration(milliseconds: 500),
+    this.flatDuration = const Duration(milliseconds: 300),
     this.height = 75.0,
     this.maxWidth,
   })  : letIndexChange = letIndexChange ?? ((_) => true),
@@ -132,7 +133,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     // 3. Icons Reveal
     _iconsController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 200),
+      duration: widget.iconRevealDuration,
     );
     _iconsController.addListener(() => setState(() {}));
 
