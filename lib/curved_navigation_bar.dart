@@ -53,8 +53,10 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   late AnimationController _animationController;
   late int _length;
 
-  late AnimationController _flattenController;
-  late AnimationController _widthController;
+  // -- ANIMATION CONTROLLERS --
+  late AnimationController _flattenController; // 1. Pop Up
+  late AnimationController _widthController; // 2. Stretch
+  late AnimationController _iconsController; // 3. Icons Reveal
 
   bool _isExpanded = false;
 
@@ -80,6 +82,8 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
       });
     });
 
+    // --- SEQUENTIAL ANIMATION CHAIN ---
+
     // 1. Vertical Up/Down
     _flattenController = AnimationController(
       vsync: this,
@@ -87,6 +91,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
     _flattenController.addListener(() => setState(() {}));
 
+    // OPEN: When Up finishes -> Start Stretching
     _flattenController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _widthController.forward();
@@ -100,9 +105,28 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
     _widthController.addListener(() => setState(() {}));
 
+    // OPEN: When Stretch finishes -> Start Icons
     _widthController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _iconsController.forward();
+      }
+      // CLOSE: When Shrink finishes -> Start Going Down
       if (status == AnimationStatus.dismissed) {
         _flattenController.reverse();
+      }
+    });
+
+    // 3. Icons Reveal
+    _iconsController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200), // Fast reveal
+    );
+    _iconsController.addListener(() => setState(() {}));
+
+    // CLOSE: When Icons Hide finishes -> Start Shrinking
+    _iconsController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) {
+        _widthController.reverse();
       }
     });
   }
@@ -126,6 +150,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     _animationController.dispose();
     _flattenController.dispose();
     _widthController.dispose();
+    _iconsController.dispose();
     super.dispose();
   }
 
@@ -134,6 +159,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     final textDirection = Directionality.of(context);
     final double verticalProgress = _flattenController.value;
     final double widthProgress = _widthController.value;
+    final double iconsProgress = _iconsController.value;
 
     return Container(
       height: widget.height,
@@ -143,30 +169,29 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
           final maxWidth = min(constraints.maxWidth, widget.maxWidth ?? constraints.maxWidth);
 
           // -- DIMENSIONS --
+          // -- DIMENSIONS --
           final double startWidth = 60.0;
           final double targetWidth = maxWidth * 0.8;
+
+          // CHANGE: Increased target radius from 10.0 to 30.0
+          // 30.0 = Half of startWidth (60.0), which creates a perfect "Pill" shape.
+          final double targetRadius = 30.0;
+
           final double currentWidth = startWidth + (widthProgress * (targetWidth - startWidth));
-          final double currentRadius = (startWidth / 2) - (widthProgress * ((startWidth / 2) - 10.0));
+
+          // logic: Start(30) -> Target(30) = No change in radius (remains fully rounded)
+          final double currentRadius = (startWidth / 2) - (widthProgress * ((startWidth / 2) - targetRadius));
 
           // -- CIRCLE SPAWNING MATH --
-          // We need 5 circles total.
-          // Spacing distance (delta) between centers.
-          final double availableSpace = targetWidth - 20; // Padding
-          // Distance between each circle center
+          final double availableSpace = targetWidth - 20;
           final double delta = availableSpace / 5;
 
-          // Phase 1 (0.0 -> 0.5): Inner circles move out from Center
+          // Phases for movement
           double p1 = (widthProgress / 0.5).clamp(0.0, 1.0);
-
-          // Phase 2 (0.5 -> 1.0): Outer circles move out from Inner circles
           double p2 = ((widthProgress - 0.5) / 0.5).clamp(0.0, 1.0);
 
-          // Positions relative to center (0)
-          // 1. Inner Pair (Left -1, Right +1)
+          // X Positions relative to center
           double innerPos = p1 * delta;
-
-          // 2. Outer Pair (Left -2, Right +2)
-          // They start exactly where Inner Pair is (innerPos), then add their own distance
           double outerPos = innerPos + (p2 * delta);
 
           // -- CENTER OFFSET CALCULATION --
@@ -217,12 +242,14 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                   // 3. Floating Button
                   Positioned(
                     bottom: -40 - (75.0 - widget.height),
-                    left: 0, right: 0, // Full width for centering logic
+                    left: 0,
+                    right: 0,
                     child: Center(
                       child: Transform.translate(
                         offset: Offset(finalXOffset, -(1 - _buttonHide) * 80 - (verticalProgress * 60)),
                         child: GestureDetector(
                           onTap: () {
+                            // If user taps the container itself (empty space), treat it as a close
                             _buttonTap(_endingIndex);
                           },
                           child: Container(
@@ -235,32 +262,65 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                                 BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(0, 2)),
                               ],
                             ),
-                            // -- CHANGED: Using a Stack to manage the 5 circles --
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
-                                // OUTER LEFT (-2)
+                                // -- LEFT OUTER (Megaphone) --
                                 Transform.translate(
                                   offset: Offset(-outerPos, 0),
-                                  child: _buildWhiteCircle(opacity: p2), // Fades in during Phase 2
+                                  child: _buildAnimatedItem(
+                                    spawnOpacity: p2,
+                                    revealProgress: iconsProgress,
+                                    icon: Icons.campaign,
+                                  ),
                                 ),
-                                // OUTER RIGHT (+2)
-                                Transform.translate(
-                                  offset: Offset(outerPos, 0),
-                                  child: _buildWhiteCircle(opacity: p2),
-                                ),
-                                // INNER LEFT (-1)
+                                // -- LEFT INNER (Chat) --
                                 Transform.translate(
                                   offset: Offset(-innerPos, 0),
-                                  child: _buildWhiteCircle(opacity: p1), // Fades in during Phase 1
+                                  child: _buildAnimatedItem(
+                                    spawnOpacity: p1,
+                                    revealProgress: iconsProgress,
+                                    icon: Icons.chat_bubble_outline,
+                                  ),
                                 ),
-                                // INNER RIGHT (+1)
+                                // -- CENTER (QR / Original) --
+
+                                AnimatedSwitcher(
+                                  duration: widget.flatDuration,
+                                  transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                                  child: _isExpanded
+                                      ? _buildAnimatedItem(
+                                          spawnOpacity: 1.0,
+                                          revealProgress: iconsProgress,
+                                          icon: Icons.qr_code_scanner,
+                                          // Pass the original icon if not fully expanded yet
+                                          fallbackIcon: _icon,
+                                        )
+                                      : SizedBox(
+                                          key: const ValueKey('collapsed'),
+                                          child: _icon,
+                                        ),
+                                ),
+
+                                // -- RIGHT INNER (Food) --
                                 Transform.translate(
                                   offset: Offset(innerPos, 0),
-                                  child: _buildWhiteCircle(opacity: p1),
+                                  child: _buildAnimatedItem(
+                                    spawnOpacity: p1,
+                                    revealProgress: iconsProgress,
+                                    icon: Icons.restaurant,
+                                  ),
                                 ),
-                                // CENTER (0) - Contains Original Icon
-                                _isExpanded ? _buildWhiteCircle(child: _icon, opacity: 1.0) : _icon,
+                                // -- RIGHT OUTER (Close X) --
+                                Transform.translate(
+                                  offset: Offset(outerPos, 0),
+                                  child: _buildAnimatedItem(
+                                    spawnOpacity: p2,
+                                    revealProgress: iconsProgress,
+                                    icon: Icons.close,
+                                    isCloseButton: true,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -277,34 +337,90 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
   }
 
-  // Helper widget for the circles
-  Widget _buildWhiteCircle({Widget? child, required double opacity}) => Opacity(
-        opacity: opacity,
-        child: Container(
-          width: 40.0, // Size of the small white circles
-          height: 40.0,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
+  // UPDATED: Handles the transition from White Circle -> Icon
+  Widget _buildAnimatedItem({
+    required double spawnOpacity,
+    required double revealProgress,
+    required IconData icon,
+    Widget? fallbackIcon, // Used for the center icon (initial state)
+    bool isCloseButton = false,
+  }) {
+    // 1. White Circle Opacity:
+    // It exists based on spawnOpacity, but FADES OUT as revealProgress goes 0 -> 1
+    final double circleOpacity = (spawnOpacity * (1 - revealProgress)).clamp(0.0, 1.0);
+
+    // 3. Slide Up Animation
+    // The final icons slide up from 20px down.
+    final double yOffset = 20 * (1 - revealProgress);
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Layer A: The White Circle (Fades Away)
+        Opacity(
+          opacity: circleOpacity,
+          child: Container(
+            width: 40.0,
+            height: 40.0,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: fallbackIcon != null && revealProgress < 0.5
+                ? Center(child: fallbackIcon) // Show original icon inside white circle initially
+                : null,
           ),
-          child: child != null ? Center(child: child) : null,
         ),
-      );
+
+        // Layer B: The Final Action Icon (Slides Up & Fades In)
+        if (revealProgress > 0.01) // Optimization: Only render if needed
+          Transform.translate(
+            offset: Offset(0, yOffset),
+            child: Opacity(
+              opacity: revealProgress,
+              child: GestureDetector(
+                onTap: () {
+                  // Add specific logic for each button here
+                  if (isCloseButton) {
+                    _buttonTap(_endingIndex); // Trigger close
+                  } else {
+                    print("Clicked $icon");
+                  }
+                },
+                child: Icon(
+                  icon,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 
   void _buttonTap(int index) {
     if (!widget.letIndexChange(index) || _animationController.isAnimating) return;
 
     if (widget.index == index) {
       if (_isExpanded) {
-        _widthController.reverse(); // Close Width first
+        // CLOSE SEQUENCE:
+        // 1. Hide Icons first
+        _iconsController.reverse();
+        // 2. Listener triggers Width Reverse
+        // 3. Listener triggers Flatten Reverse
         _isExpanded = false;
       } else {
-        _flattenController.forward(); // Open Up first
+        // OPEN SEQUENCE:
+        // 1. Pop Up first
+        _flattenController.forward();
+        // 2. Listener triggers Width Forward
+        // 3. Listener triggers Icons Forward
         _isExpanded = true;
       }
     } else {
       if (_isExpanded) {
-        _widthController.reverse();
+        _iconsController.reverse();
         _isExpanded = false;
       }
     }
