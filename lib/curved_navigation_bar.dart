@@ -53,9 +53,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   late AnimationController _animationController;
   late int _length;
 
-  // 1. Vertical Controller (Pop Up)
   late AnimationController _flattenController;
-  // 2. Horizontal Controller (Stretch to 80%)
   late AnimationController _widthController;
 
   bool _isExpanded = false;
@@ -69,7 +67,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     _startingPos = widget.index / _length;
     _endingIndex = widget.index;
 
-    // Movement animation (Left <-> Right)
     _animationController = AnimationController(vsync: this, value: _pos);
     _animationController.addListener(() {
       setState(() {
@@ -83,8 +80,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
       });
     });
 
-    // --- SEQUENTIAL ANIMATION SETUP ---
-
     // 1. Vertical Up/Down
     _flattenController = AnimationController(
       vsync: this,
@@ -92,21 +87,19 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
     _flattenController.addListener(() => setState(() {}));
 
-    // When Up finishes -> Start Stretching
     _flattenController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _widthController.forward();
       }
     });
 
-    // 2. Width Stretch
+    // 2. Width Stretch & Circle Spawning
     _widthController = AnimationController(
       vsync: this,
       duration: widget.flatDuration,
     );
     _widthController.addListener(() => setState(() {}));
 
-    // When Shrink finishes -> Start Going Down
     _widthController.addStatusListener((status) {
       if (status == AnimationStatus.dismissed) {
         _flattenController.reverse();
@@ -139,8 +132,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
   @override
   Widget build(BuildContext context) {
     final textDirection = Directionality.of(context);
-
-    // Animation Values
     final double verticalProgress = _flattenController.value;
     final double widthProgress = _widthController.value;
 
@@ -151,13 +142,40 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
         builder: (context, constraints) {
           final maxWidth = min(constraints.maxWidth, widget.maxWidth ?? constraints.maxWidth);
 
-          // -- WIDTH CALCULATIONS --
+          // -- DIMENSIONS --
           final double startWidth = 60.0;
-          // Target width is 80% of the Page Width
           final double targetWidth = maxWidth * 0.8;
-
           final double currentWidth = startWidth + (widthProgress * (targetWidth - startWidth));
           final double currentRadius = (startWidth / 2) - (widthProgress * ((startWidth / 2) - 10.0));
+
+          // -- CIRCLE SPAWNING MATH --
+          // We need 5 circles total.
+          // Spacing distance (delta) between centers.
+          final double availableSpace = targetWidth - 20; // Padding
+          // Distance between each circle center
+          final double delta = availableSpace / 5;
+
+          // Phase 1 (0.0 -> 0.5): Inner circles move out from Center
+          double p1 = (widthProgress / 0.5).clamp(0.0, 1.0);
+
+          // Phase 2 (0.5 -> 1.0): Outer circles move out from Inner circles
+          double p2 = ((widthProgress - 0.5) / 0.5).clamp(0.0, 1.0);
+
+          // Positions relative to center (0)
+          // 1. Inner Pair (Left -1, Right +1)
+          double innerPos = p1 * delta;
+
+          // 2. Outer Pair (Left -2, Right +2)
+          // They start exactly where Inner Pair is (innerPos), then add their own distance
+          double outerPos = innerPos + (p2 * delta);
+
+          // -- CENTER OFFSET CALCULATION --
+          final double slotWidth = maxWidth / _length;
+          final double activeTabCenter = (_pos * maxWidth) + (slotWidth / 2);
+          final double screenCenter = maxWidth / 2;
+          final double distFromCenter = activeTabCenter - screenCenter;
+          final double currentXOffset = distFromCenter * (1 - widthProgress);
+          final double finalXOffset = textDirection == TextDirection.rtl ? -currentXOffset : currentXOffset;
 
           return Align(
             alignment: textDirection == TextDirection.ltr ? Alignment.bottomLeft : Alignment.bottomRight,
@@ -196,67 +214,58 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                             .toList()),
                   ),
 
-                  // 3. Floating Button (Top Layer)
-                  // FIX: Set left/right to 0 so the constraints allow the button to grow to full screen width.
+                  // 3. Floating Button
                   Positioned(
                     bottom: -40 - (75.0 - widget.height),
-                    left: 0,
-                    right: 0,
-                    // Remove 'width: maxWidth / _length' constraint!
+                    left: 0, right: 0, // Full width for centering logic
                     child: Center(
-                      child: Builder(builder: (context) {
-                        // -- 1. Calculate Distances --
-                        final double slotWidth = maxWidth / _length;
-                        // The center X coordinate of the currently selected tab
-                        final double activeTabCenter = (_pos * maxWidth) + (slotWidth / 2);
-                        // The absolute center of the screen
-                        final double screenCenter = maxWidth / 2;
-
-                        // Distance from the screen center to the tab center
-                        // (This is how far we need to push the button when it's closed)
-                        final double distFromCenter = activeTabCenter - screenCenter;
-
-                        // -- 2. Animate Translation --
-                        // When widthProgress is 0 (Closed): Offset = distFromCenter (Button is on the tab)
-                        // When widthProgress is 1 (Open): Offset = 0 (Button is in the center of screen)
-                        final double currentXOffset = distFromCenter * (1 - widthProgress);
-
-                        // Handle RTL
-                        final double finalXOffset = textDirection == TextDirection.rtl ? -currentXOffset : currentXOffset;
-
-                        return Transform.translate(
-                          offset: Offset(
-                            finalXOffset,
-                            -(1 - _buttonHide) * 80 - (verticalProgress * 60),
-                          ),
-                          child: GestureDetector(
-                            onTap: () {
-                              _buttonTap(_endingIndex);
-                            },
-                            child: Container(
-                              height: startWidth,
-                              width: currentWidth, // Now this 440.0 width can actually render!
-                              decoration: BoxDecoration(
-                                color: widget.buttonBackgroundColor ?? widget.color,
-                                borderRadius: BorderRadius.circular(currentRadius),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black26,
-                                    blurRadius: 2,
-                                    offset: Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: _icon,
+                      child: Transform.translate(
+                        offset: Offset(finalXOffset, -(1 - _buttonHide) * 80 - (verticalProgress * 60)),
+                        child: GestureDetector(
+                          onTap: () {
+                            _buttonTap(_endingIndex);
+                          },
+                          child: Container(
+                            height: startWidth,
+                            width: currentWidth,
+                            decoration: BoxDecoration(
+                              color: widget.buttonBackgroundColor ?? widget.color,
+                              borderRadius: BorderRadius.circular(currentRadius),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(0, 2)),
+                              ],
+                            ),
+                            // -- CHANGED: Using a Stack to manage the 5 circles --
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                // OUTER LEFT (-2)
+                                Transform.translate(
+                                  offset: Offset(-outerPos, 0),
+                                  child: _buildWhiteCircle(opacity: p2), // Fades in during Phase 2
                                 ),
-                              ),
+                                // OUTER RIGHT (+2)
+                                Transform.translate(
+                                  offset: Offset(outerPos, 0),
+                                  child: _buildWhiteCircle(opacity: p2),
+                                ),
+                                // INNER LEFT (-1)
+                                Transform.translate(
+                                  offset: Offset(-innerPos, 0),
+                                  child: _buildWhiteCircle(opacity: p1), // Fades in during Phase 1
+                                ),
+                                // INNER RIGHT (+1)
+                                Transform.translate(
+                                  offset: Offset(innerPos, 0),
+                                  child: _buildWhiteCircle(opacity: p1),
+                                ),
+                                // CENTER (0) - Contains Original Icon
+                                _isExpanded ? _buildWhiteCircle(child: _icon, opacity: 1.0) : _icon,
+                              ],
                             ),
                           ),
-                        );
-                      }),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -268,19 +277,29 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
     );
   }
 
+  // Helper widget for the circles
+  Widget _buildWhiteCircle({Widget? child, required double opacity}) => Opacity(
+        opacity: opacity,
+        child: Container(
+          width: 40.0, // Size of the small white circles
+          height: 40.0,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+          ),
+          child: child != null ? Center(child: child) : null,
+        ),
+      );
+
   void _buttonTap(int index) {
-    if (!widget.letIndexChange(index) || _animationController.isAnimating) {
-      return;
-    }
+    if (!widget.letIndexChange(index) || _animationController.isAnimating) return;
 
     if (widget.index == index) {
       if (_isExpanded) {
-        // Close: Shrink Width -> Then Drop Down
-        _widthController.reverse();
+        _widthController.reverse(); // Close Width first
         _isExpanded = false;
       } else {
-        // Open: Pop Up -> Then Stretch Width
-        _flattenController.forward();
+        _flattenController.forward(); // Open Up first
         _isExpanded = true;
       }
     } else {
@@ -290,9 +309,8 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
       }
     }
 
-    if (widget.onTap != null) {
-      widget.onTap!(index);
-    }
+    if (widget.onTap != null) widget.onTap!(index);
+
     final newPosition = index / _length;
     setState(() {
       _startingPos = _pos;
