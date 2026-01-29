@@ -174,7 +174,6 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
 
   @override
   Widget build(BuildContext context) {
-    final textDirection = Directionality.of(context);
     final double widthProgress = _widthController.value;
     final double iconsProgress = _iconsController.value;
 
@@ -230,10 +229,9 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
           final double screenCenter = maxWidth / 2;
           final double distFromCenter = activeTabCenter - screenCenter;
           final double currentXOffset = distFromCenter * (1 - widthProgress);
-          final double finalXOffset = textDirection == TextDirection.rtl ? -currentXOffset : currentXOffset;
 
           return Align(
-            alignment: textDirection == TextDirection.ltr ? Alignment.bottomLeft : Alignment.bottomRight,
+            alignment: Alignment.bottomLeft,
             child: SizedBox(
               width: maxWidth,
               child: Stack(
@@ -247,7 +245,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                     right: 0,
                     height: 75.0,
                     child: CustomPaint(
-                      painter: NavCustomPainter(_pos, _length, widget.color, textDirection, 0.0),
+                      painter: NavCustomPainter(_pos, _length, widget.color),
                     ),
                   ),
 
@@ -288,7 +286,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
                               child: Transform.translate(
                                 // same X tracking, but this one moves UP during spawn
                                 offset: Offset(
-                                  finalXOffset,
+                                  currentXOffset,
                                   -(1 - _buttonHide) * 80 - (_flattenController.value * 70),
                                 ),
                                 child: _buildSpawnedBar(
@@ -305,7 +303,7 @@ class CurvedNavigationBarState extends State<CurvedNavigationBar> with TickerPro
 
                           // B) MAIN CIRCLE (always stays at original position)
                           Transform.translate(
-                            offset: Offset(finalXOffset, -(1 - _buttonHide) * 80),
+                            offset: Offset(currentXOffset, -(1 - _buttonHide) * 80),
                             child: _buildMainCircle(startWidth),
                           ),
                         ],

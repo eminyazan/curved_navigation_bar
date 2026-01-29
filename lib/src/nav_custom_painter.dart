@@ -4,15 +4,12 @@ class NavCustomPainter extends CustomPainter {
   late double loc;
   late double s;
   Color color;
-  TextDirection textDirection;
-  double flatten; // New variable: 0.0 = Curved, 1.0 = Flat
 
-  NavCustomPainter(
-      double startingLoc, int itemsLength, this.color, this.textDirection, this.flatten) {
+  NavCustomPainter(double startingLoc, int itemsLength, this.color) {
     final span = 1.0 / itemsLength;
     s = 0.2;
     double l = startingLoc + (span - s) / 2;
-    loc = textDirection == TextDirection.rtl ? 0.8 - l : l;
+    loc = l;
   }
 
   @override
@@ -23,8 +20,8 @@ class NavCustomPainter extends CustomPainter {
 
     // We scale the "depth" of the curve by (1 - flatten)
     // If flatten is 1.0, these become 0.0, creating a straight line.
-    double curveHeight = size.height * 0.60 * (1 - flatten);
-    double topHeight = size.height * 0.05 * (1 - flatten);
+    double curveHeight = size.height * 0.60;
+    double topHeight = size.height * 0.05;
 
     final path = Path()
       ..moveTo(0, 0)
@@ -53,7 +50,5 @@ class NavCustomPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(CustomPainter oldDelegate) {
-    return true;
-  }
+  bool shouldRepaint(CustomPainter oldDelegate) => true;
 }
